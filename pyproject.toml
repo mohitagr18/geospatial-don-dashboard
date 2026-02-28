@@ -1,0 +1,12 @@
+[project]
+name = "geospatial-don-dashboard"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "faker>=37.12.0",
+    "folium>=0.20.0",
+    "pandas>=2.3.3",
+    "streamlit>=1.50.0",
+]
