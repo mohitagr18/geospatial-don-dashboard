@@ -5,6 +5,8 @@ import folium
 import math
 from streamlit_folium import st_folium
 
+st.set_page_config(layout="wide", page_title="DON Dashboard")
+
 def haversine(lat1, lon1, lat2, lon2):
     R = 3958.8 # Earth radius in miles
     dLat = math.radians(lat2 - lat1)
@@ -16,17 +18,22 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
-st.set_page_config(layout="wide", page_title="DON Dashboard")
-
 @st.cache_data
 def load_data():
     conn = sqlite3.connect('data/staffing_engine.db')
     clients_df = pd.read_sql_query("SELECT * FROM clients", conn)
     staff_df = pd.read_sql_query("SELECT * FROM vw_staff_capacity", conn)
     conn.close()
+    
+    # Pre-compute full name for clients
+    clients_df['Full Name'] = clients_df['First Name'] + ' ' + clients_df['Last Name']
     return clients_df, staff_df
 
 clients_df, staff_df = load_data()
+
+# Initialize session state for selected client
+if 'selected_client' not in st.session_state:
+    st.session_state.selected_client = None
 
 st.title("Geospatial Intelligence Dashboard")
 
@@ -44,28 +51,67 @@ elif radius_filter == "20":
 else:
     max_dist = float('inf')
 
-st.write("Click on a location to find nearby staff based on your selected distance radius.")
+# Sidebar Legend
+st.sidebar.markdown("---")
+st.sidebar.subheader("Legend")
+st.sidebar.markdown("**Shapes**")
+st.sidebar.markdown("🔵 Circle = Client")
+st.sidebar.markdown("🔺 Triangle = PCA")
+st.sidebar.markdown("🟦 Square = LPN")
+st.sidebar.markdown("⬟ Pentagon = RN")
+st.sidebar.markdown("")
+st.sidebar.markdown("**Colors (Staff Availability)**")
+st.sidebar.markdown("🟢 Green = Available (>10 hrs)")
+st.sidebar.markdown("🟠 Orange = Limited (1-10 hrs)")
+st.sidebar.markdown("🔴 Red = Unavailable (<= 0 hrs)")
 
-m = folium.Map(location=[37.5, -77.5], zoom_start=11)
+st.sidebar.markdown("---")
+if st.sidebar.button("Reset Map"):
+    st.session_state.selected_client = None
+    st.rerun()
+
+# Dynamic Map Center based on session state
+if st.session_state.selected_client:
+    selected_client_row = clients_df[clients_df['Full Name'] == st.session_state.selected_client].iloc[0]
+    map_center = [selected_client_row['Latitude'], selected_client_row['Longitude']]
+else:
+    map_center = [37.5, -77.5]
+
+if st.session_state.selected_client:
+    st.write("Displaying focused map for selected client.")
+else:
+    st.write("Click on a location to find nearby staff based on your selected distance radius.")
+
+m = folium.Map(location=map_center, zoom_start=11)
 
 fg_clients = folium.FeatureGroup(name="Clients")
 fg_rns = folium.FeatureGroup(name="RNs")
 fg_lpns = folium.FeatureGroup(name="LPNs")
 fg_pcas = folium.FeatureGroup(name="PCAs")
 
-for _, client in clients_df.iterrows():
-    tooltip_html = f"<b>Client ID:</b> {client['Client_ID']}<br><b>Cats:</b> {'Yes' if client['Has_Cats'] else 'No'}<br><b>Dogs:</b> {'Yes' if client['Has_Dogs'] else 'No'}<br><b>Prefers Non-Smoker:</b> {'Yes' if client['Prefers_Non_Smoker'] else 'No'}"
+# Dynamic Map Generation based on session state
+if st.session_state.selected_client:
+    clients_to_draw = clients_df[clients_df['Full Name'] == st.session_state.selected_client]
+    staff_df['Distance_Miles'] = staff_df.apply(
+        lambda row: haversine(selected_client_row['Latitude'], selected_client_row['Longitude'], row['Latitude'], row['Longitude']), axis=1
+    )
+    staff_to_draw = staff_df[staff_df['Distance_Miles'] <= max_dist]
+else:
+    clients_to_draw = clients_df
+    staff_to_draw = staff_df
+
+for _, client in clients_to_draw.iterrows():
+    client_name = client['Full Name']
     folium.CircleMarker(
         location=[client['Latitude'], client['Longitude']],
         radius=6,
         color='blue',
         fill=True,
         fill_opacity=0.7,
-        tooltip=tooltip_html,
-        popup=folium.Popup(client['Client_ID'], parse_html=True, name=client['Client_ID'])
+        tooltip=client_name
     ).add_to(fg_clients)
 
-for _, staff in staff_df.iterrows():
+for _, staff in staff_to_draw.iterrows():
     role = staff['Role']
     sides = 3 # default PCA
     if role == 'PCA':
@@ -89,9 +135,9 @@ for _, staff in staff_df.iterrows():
     else:
         fill_color = 'red'
 
-    smokes = 'Yes' if staff['Smokes'] else 'No'
-    cats_ok = 'Yes' if staff['Cats_OK'] else 'No'
-    dogs_ok = 'Yes' if staff['Dogs_OK'] else 'No'
+    smokes = 'Yes' if int(staff['Smokes']) else 'No'
+    cats_ok = 'Yes' if int(staff['Cats_OK']) else 'No'
+    dogs_ok = 'Yes' if int(staff['Dogs_OK']) else 'No'
 
     tooltip_html = f"""
     <b>Name:</b> {staff['First Name']} {staff['Last Name']}<br>
@@ -121,22 +167,43 @@ fg_pcas.add_to(m)
 
 folium.LayerControl().add_to(m)
 
-st_data = st_folium(m, width=1000, height=500)
+st_data = st_folium(m, width=1200, height=650, returned_objects=["last_object_clicked_tooltip", "last_clicked"])
 
-if st_data and st_data.get("last_clicked"):
-    clicked_lat = st_data["last_clicked"]["lat"]
-    clicked_lon = st_data["last_clicked"]["lng"]
+clicked_tooltip = st_data.get("last_object_clicked_tooltip")
 
-    staff_df['Distance_Miles'] = staff_df.apply(
-        lambda row: haversine(clicked_lat, clicked_lon, row['Latitude'], row['Longitude']), axis=1
-    )
+# State change hook -> Check if client marker clicked and update state
+if clicked_tooltip and clicked_tooltip in clients_df['Full Name'].values:
+    if st.session_state.selected_client != clicked_tooltip:
+        st.session_state.selected_client = clicked_tooltip
+        st.rerun()
 
-    filtered_staff = staff_df[staff_df['Distance_Miles'] <= max_dist].copy()
-    filtered_staff = filtered_staff.sort_values(by=['Distance_Miles', 'Available_Hours'], ascending=[True, False])
+# Display formatted dataframe table
+if st.session_state.selected_client:
+    selected_client_name = st.session_state.selected_client
+    st.subheader(f"Showing Nearby Staff for: {selected_client_name}")
     
-    display_cols = ['First Name', 'Last Name', 'Role', 'Distance_Miles', 'Max_Weekly_Hours', 'Available_Hours', 'Smokes', 'Cats_OK', 'Dogs_OK']
+    filtered_staff = staff_to_draw.copy()
     
-    st.subheader(f"Nearby Staff (within {radius_filter if max_dist < float('inf') else 'any'} distance)")
-    st.dataframe(filtered_staff[display_cols])
+    if not filtered_staff.empty:
+        filtered_staff = filtered_staff.sort_values(by=['Distance_Miles', 'Available_Hours'], ascending=[True, False])
+        
+        filtered_staff['Smokes'] = filtered_staff['Smokes'].apply(lambda x: "Yes" if int(x) else "No")
+        filtered_staff['Cats_OK'] = filtered_staff['Cats_OK'].apply(lambda x: "Yes" if int(x) else "No")
+        filtered_staff['Dogs_OK'] = filtered_staff['Dogs_OK'].apply(lambda x: "Yes" if int(x) else "No")
+        
+        display_cols = ['First Name', 'Last Name', 'Role', 'Distance_Miles', 'Max_Weekly_Hours', 'Available_Hours', 'Smokes', 'Cats_OK', 'Dogs_OK']
+        formatted_df = filtered_staff[display_cols].copy()
+        
+        formatted_df = formatted_df.rename(columns={
+            'Distance_Miles': 'Distance (Miles)',
+            'Max_Weekly_Hours': 'Max Weekly Hours',
+            'Available_Hours': 'Available Hours',
+            'Cats_OK': 'Cats OK',
+            'Dogs_OK': 'Dogs OK'
+        })
+        
+        st.dataframe(formatted_df)
+    else:
+        st.info("No staff members found within the selected distance radius.")
 else:
-    st.info("Click on a location on the map to find nearby staff.")
+    st.info("Click on a client marker on the map to find nearby staff.")
