@@ -9,4 +9,5 @@ dependencies = [
     "folium>=0.20.0",
     "pandas>=2.3.3",
     "streamlit>=1.50.0",
+    "streamlit-folium>=0.25.3",
 ]

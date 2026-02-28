@@ -331,6 +331,8 @@ dependencies = [
     { name = "pandas" },
     { name = "streamlit", version = "1.50.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "streamlit", version = "1.54.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "streamlit-folium", version = "0.25.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "streamlit-folium", version = "0.26.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 
 [package.metadata]
@@ -339,6 +341,7 @@ requires-dist = [
     { name = "folium", specifier = ">=0.20.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "streamlit", specifier = ">=1.50.0" },
+    { name = "streamlit-folium", specifier = ">=0.25.3" },
 ]
 
 [[package]]
@@ -1711,6 +1714,51 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/be/66/d887ee80ea85f035baee607c60af024994e17ae9b921277fca9675e76ecf/streamlit-1.54.0.tar.gz", hash = "sha256:09965e6ae7eb0357091725de1ce2a3f7e4be155c2464c505c40a3da77ab69dd8", size = 8662292, upload-time = "2026-02-04T16:37:54.734Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/48/1d/40de1819374b4f0507411a60f4d2de0d620a9b10c817de5925799132b6c9/streamlit-1.54.0-py3-none-any.whl", hash = "sha256:a7b67d6293a9f5f6b4d4c7acdbc4980d7d9f049e78e404125022ecb1712f79fc", size = 9119730, upload-time = "2026-02-04T16:37:52.199Z" },
+]
+
+[[package]]
+name = "streamlit-folium"
+version = "0.25.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.10'",
+]
+dependencies = [
+    { name = "branca", marker = "python_full_version < '3.10'" },
+    { name = "folium", marker = "python_full_version < '3.10'" },
+    { name = "jinja2", marker = "python_full_version < '3.10'" },
+    { name = "streamlit", version = "1.50.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7f/2d/99571b9ac124a4382db1c10d03fd95f5c126a3cbe7191789b5b807890d2c/streamlit_folium-0.25.3.tar.gz", hash = "sha256:5ec11b3eff85ec0d6259e72e5597bd79ca7ad65b8837222220964b78428f415b", size = 522601, upload-time = "2025-09-30T22:45:36.325Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/35/d3cdab8cff94971714f866181abb1aa84ad976f6e7b6218a0499197465e4/streamlit_folium-0.25.3-py3-none-any.whl", hash = "sha256:cfdf085764da3f9b5e1e0668f6e4cc0385ff041c98133d023800983a875ca26c", size = 524601, upload-time = "2025-09-30T22:45:34.825Z" },
+]
+
+[[package]]
+name = "streamlit-folium"
+version = "0.26.2"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.10.*'",
+]
+dependencies = [
+    { name = "branca", marker = "python_full_version >= '3.10'" },
+    { name = "folium", marker = "python_full_version >= '3.10'" },
+    { name = "jinja2", marker = "python_full_version >= '3.10'" },
+    { name = "streamlit", version = "1.54.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/47/973d822f41dec182c3b03b2c418bffc831e861d6872a4637f79ccd95c754/streamlit_folium-0.26.2.tar.gz", hash = "sha256:721e712d6edddd0a87e65d7378ba38e467014f3f042b16ca170302c07169c351", size = 521771, upload-time = "2026-02-24T17:51:35.819Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/6f/0ca25c31f3d7e2faa25def363438c81e789622e1365b38be9ccd8dc11055/streamlit_folium-0.26.2-py3-none-any.whl", hash = "sha256:6374a932e7d94806af122b89982c805ab0641a17a350d160cf74a96d5b8300c1", size = 523736, upload-time = "2026-02-24T17:51:37.604Z" },
 ]
 
 [[package]]
