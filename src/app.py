@@ -35,7 +35,7 @@ clients_df, staff_df = load_data()
 if 'selected_client' not in st.session_state:
     st.session_state.selected_client = None
 
-st.title("Geospatial Intelligence Dashboard")
+st.title("Staffing Dashboard")
 
 st.sidebar.header("Filters")
 radius_filter = st.sidebar.radio("Distance Radius", ["5", "10", "15", "20", ">20 miles"])
