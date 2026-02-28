@@ -54,16 +54,51 @@ else:
 # Sidebar Legend
 st.sidebar.markdown("---")
 st.sidebar.subheader("Legend")
-st.sidebar.markdown("**Shapes**")
-st.sidebar.markdown("🔵 Circle = Client")
-st.sidebar.markdown("🔺 Triangle = PCA")
-st.sidebar.markdown("🟦 Square = LPN")
-st.sidebar.markdown("⬟ Pentagon = RN")
-st.sidebar.markdown("")
-st.sidebar.markdown("**Colors (Staff Availability)**")
-st.sidebar.markdown("🟢 Green = Available (>10 hrs)")
-st.sidebar.markdown("🟠 Orange = Limited (1-10 hrs)")
-st.sidebar.markdown("🔴 Red = Unavailable (<= 0 hrs)")
+st.sidebar.markdown("🔵 Client")
+st.sidebar.markdown("Staff Roles (Shapes):")
+
+# The Shapes Legend
+st.sidebar.markdown(
+    """
+<div style='color: #B0B0B0; font-size: 16px; display: flex; flex-direction: column; gap: 8px;'>
+    <div style='display: flex; align-items: center; gap: 8px;'>
+        <svg width='26' height='26' viewBox='0 0 26 26'>
+            <polygon points='13,3 23,23 3,23' stroke='#B0B0B0' stroke-width='2.5' fill='none'/>
+        </svg>
+        PCA
+    </div>
+    <div style='display: flex; align-items: center; gap: 8px;'>
+        <svg width='26' height='26' viewBox='0 0 26 26'>
+            <rect x='4' y='4' width='18' height='18' stroke='#B0B0B0' stroke-width='2.5' fill='none'/>
+        </svg>
+        LPN
+    </div>
+    <div style='display: flex; align-items: center; gap: 8px;'>
+        <svg width='26' height='26' viewBox='0 0 26 26'>
+            <polygon points='13,2 24,10 20,22 6,22 2,10'
+                     stroke='#B0B0B0' stroke-width='2.5' fill='none'/>
+        </svg>
+        RN
+    </div>
+</div>
+"""
+, 
+    unsafe_allow_html=True
+)
+st.sidebar.markdown(" ")
+# The Colors Legend
+st.sidebar.markdown("Staff Availability (Colors):")
+st.sidebar.markdown(
+    """
+    <div style='display: flex; flex-direction: column; gap: 2px; font-size: 16px; margin: 0; padding: 0;'>
+        <div style='margin: 0; padding: 0; line-height: 1.2;'><span style='color: #28a745; font-size: 26px; vertical-align: middle; display: inline-block; width: 30px; text-align: center;'>■</span> &gt; 10 Hours</div>
+        <div style='margin: 0; padding: 0; line-height: 1.2;'><span style='color: #fd7e14; font-size: 26px; vertical-align: middle; display: inline-block; width: 30px; text-align: center;'>■</span> 1-10 Hours</div>
+        <div style='margin: 0; padding: 0; line-height: 1.2;'><span style='color: #dc3545; font-size: 26px; vertical-align: middle; display: inline-block; width: 30px; text-align: center;'>■</span> 0 Hours</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Reset Map"):
@@ -193,6 +228,8 @@ if st.session_state.selected_client:
         
         display_cols = ['First Name', 'Last Name', 'Role', 'Distance_Miles', 'Max_Weekly_Hours', 'Available_Hours', 'Smokes', 'Cats_OK', 'Dogs_OK']
         formatted_df = filtered_staff[display_cols].copy()
+        formatted_df['Distance_Miles'] = formatted_df['Distance_Miles'].round(1)
+
         
         formatted_df = formatted_df.rename(columns={
             'Distance_Miles': 'Distance (Miles)',
