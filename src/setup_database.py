@@ -31,6 +31,9 @@ def main():
         s.Latitude,
         s.Longitude,
         s.Max_Weekly_Hours,
+        s.Smokes,
+        s.Cats_OK,
+        s.Dogs_OK,
         COALESCE(SUM(sch.Hours_Committed), 0) AS Total_Committed_Hours,
         (s.Max_Weekly_Hours - COALESCE(SUM(sch.Hours_Committed), 0)) AS Available_Hours
     FROM 
@@ -38,7 +41,7 @@ def main():
     LEFT JOIN 
         schedule sch ON s.Staff_ID = sch.Staff_ID
     GROUP BY 
-        s.Staff_ID, s."First Name", s."Last Name", s.Role, s.Latitude, s.Longitude, s.Max_Weekly_Hours;
+        s.Staff_ID, s."First Name", s."Last Name", s.Role, s.Latitude, s.Longitude, s.Max_Weekly_Hours, s.Smokes, s.Cats_OK, s.Dogs_OK;
     """
     conn.execute(create_view_sql)
     conn.commit()

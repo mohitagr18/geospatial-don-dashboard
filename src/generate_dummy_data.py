@@ -32,7 +32,10 @@ def generate_clients():
             'State': 'VA',
             'Zip': fake.zipcode_in_state('VA'),
             'Latitude': lat,
-            'Longitude': lon
+            'Longitude': lon,
+            'Has_Cats': random.choice([True, False]),
+            'Has_Dogs': random.choice([True, False]),
+            'Prefers_Non_Smoker': random.choice([True, False])
         })
     return clients
 
@@ -52,7 +55,10 @@ def generate_staff():
             'Role': random.choice(ROLES),
             'Max_Weekly_Hours': random.randint(20, 40),
             'Latitude': lat,
-            'Longitude': lon
+            'Longitude': lon,
+            'Smokes': random.choice([True, False]),
+            'Cats_OK': random.choice([True, False]),
+            'Dogs_OK': random.choice([True, False])
         })
     return staff
 
