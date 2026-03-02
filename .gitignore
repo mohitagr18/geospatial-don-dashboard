@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project data — CSVs and SQLite DB contain PII; never push to GitHub
+/data/
