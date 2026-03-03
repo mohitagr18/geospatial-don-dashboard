@@ -54,32 +54,35 @@ if 'selected_client' not in st.session_state:
 
 st.sidebar.header("Select Client")
 
+# Drive the selectbox index directly from session state.
+# This is the ONLY correct Streamlit pattern for bidirectional sync:
+# do NOT use key= here — index= must control the value, not session_state.
+sel = st.session_state.selected_client
+current_idx = sorted_client_names.index(sel) if sel in sorted_client_names else None
+
 dropdown_choice = st.sidebar.selectbox(
     "Client Name",
     options=sorted_client_names,
-    index=None,                          # None = no pre-selection (shows placeholder)
+    index=current_idx,
     placeholder="Type or scroll to find a client…",
     label_visibility="collapsed",
-    # Streamlit v1.29+ renders a search input automatically when options > ~10
-    key="client_selectbox",
 )
 
-# Sync dropdown → session state
-if dropdown_choice is not None:
-    if st.session_state.selected_client != dropdown_choice:
-        st.session_state.selected_client = dropdown_choice
-        st.rerun()
-elif dropdown_choice is None and st.session_state.selected_client is not None:
-    # Only reset if the user actively cleared the box (not just on load)
-    pass  # Don't wipe state on load; Reset Map button handles explicit clear
+# Sync dropdown ↔ session state (covers selection, x-clear, and map-click updates)
+if dropdown_choice != st.session_state.selected_client:
+    st.session_state.selected_client = dropdown_choice   # None if user hit x
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.header("Filters")
 
-# FIX: corrected options list (was ">20 miles", now "> 20 miles")
+has_client = bool(st.session_state.selected_client)
+
 radius_filter = st.sidebar.radio(
     "Distance Radius (miles)",
     ["5", "10", "15", "20", "> 20 miles"],
+    disabled=not has_client,
+    help="Select a client first to filter by distance." if not has_client else "Filter staff by distance to the selected client."
 )
 
 max_dist = {"5": 5, "10": 10, "15": 15, "20": 20}.get(radius_filter, float('inf'))
@@ -260,6 +263,7 @@ st_data = st_folium(
     use_container_width=True,
     height=650,
     returned_objects=["last_object_clicked_tooltip", "last_clicked"],
+    key=f"map_{st.session_state.selected_client}_{max_dist}",
 )
 
 # Sync map click → session state
@@ -305,7 +309,16 @@ if st.session_state.selected_client:
             'Available_Hours':  'Available Hours',
         })
 
-        st.dataframe(formatted_df, use_container_width=True)
+        # Expand table to fit all rows — no fixed height, no inner scroll
+        row_px = 35
+        header_px = 38
+        table_height = header_px + len(formatted_df) * row_px
+        st.dataframe(
+            formatted_df,
+            use_container_width=True,
+            height=table_height,
+            hide_index=True,
+        )
     else:
         st.info("No staff members found within the selected distance radius.")
 else:
