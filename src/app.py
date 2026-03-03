@@ -78,14 +78,18 @@ st.sidebar.header("Filters")
 
 has_client = bool(st.session_state.selected_client)
 
+# Use a Unicode 'greater-than' character so Streamlit doesn't treat > as HTML
+RADIUS_OPTIONS = ["5", "10", "15", "20", "25", "› 25 miles"]
+INF_OPTION     = "› 25 miles"   # must match exactly
+
 radius_filter = st.sidebar.radio(
     "Distance Radius (miles)",
-    ["5", "10", "15", "20", "> 20 miles"],
+    RADIUS_OPTIONS,
     disabled=not has_client,
     help="Select a client first to filter by distance." if not has_client else "Filter staff by distance to the selected client."
 )
 
-max_dist = {"5": 5, "10": 10, "15": 15, "20": 20}.get(radius_filter, float('inf'))
+max_dist = {"5": 5, "10": 10, "15": 15, "20": 20, "25": 25}.get(radius_filter, float('inf'))
 
 # ── Sidebar Legend ────────────────────────────────────────────────────────────
 st.sidebar.markdown("---")
@@ -139,15 +143,8 @@ if st.sidebar.button("Reset Map"):
 
 # ─── MAP SETUP ────────────────────────────────────────────────────────────────
 
-if st.session_state.selected_client:
-    selected_client_row = clients_df[
-        clients_df['Full Name'] == st.session_state.selected_client
-    ].iloc[0]
-    map_center = [selected_client_row['Latitude'], selected_client_row['Longitude']]
-    map_zoom   = 12
-else:
-    map_center = [37.5, -77.5]
-    map_zoom   = 11
+# MAP_SETUP: default center; fit_bounds below will override it when a client is selected
+map_center = [37.5, -77.5]
 
 st.title("Staffing Dashboard")
 if st.session_state.selected_client:
@@ -155,7 +152,7 @@ if st.session_state.selected_client:
 else:
     st.write("Select a client from the sidebar or click a blue circle on the map to find nearby staff.")
 
-m = folium.Map(location=map_center, zoom_start=map_zoom)
+m = folium.Map(location=[37.5, -77.5], zoom_start=11)
 
 fg_clients = folium.FeatureGroup(name="Clients")
 fg_rns     = folium.FeatureGroup(name="RNs")
@@ -165,6 +162,9 @@ fg_pcas    = folium.FeatureGroup(name="PCAs")
 # ─── DYNAMIC LAYER LOGIC ─────────────────────────────────────────────────────
 
 if st.session_state.selected_client:
+    selected_client_row = clients_df[
+        clients_df['Full Name'] == st.session_state.selected_client
+    ].iloc[0]
     clients_to_draw = clients_df[clients_df['Full Name'] == st.session_state.selected_client]
     staff_work = staff_df.copy()
     staff_work['Distance_Miles'] = staff_work.apply(
@@ -174,6 +174,15 @@ if st.session_state.selected_client:
         ), axis=1
     )
     staff_to_draw = staff_work[staff_work['Distance_Miles'] <= max_dist]
+
+    # ── Auto-fit map bounds to contain the client + all staff in range ─────────
+    all_lats = list(staff_to_draw['Latitude'].dropna()) + [selected_client_row['Latitude']]
+    all_lons = list(staff_to_draw['Longitude'].dropna()) + [selected_client_row['Longitude']]
+    if all_lats and all_lons:
+        padding = 0.02   # ~1.5 miles of breathing room around the outermost pin
+        sw = [min(all_lats) - padding, min(all_lons) - padding]
+        ne = [max(all_lats) + padding, max(all_lons) + padding]
+        m.fit_bounds([sw, ne])
 else:
     clients_to_draw = clients_df
     staff_to_draw   = staff_df.copy()
