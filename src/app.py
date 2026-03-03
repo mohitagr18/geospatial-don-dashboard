@@ -88,24 +88,27 @@ max_dist = {"5": 5, "10": 10, "15": 15, "20": 20}.get(radius_filter, float('inf'
 st.sidebar.markdown("---")
 st.sidebar.subheader("Legend")
 st.sidebar.markdown("🔵 Circle = Client")
-st.sidebar.markdown("**Staff Roles (Shapes):**")
+st.sidebar.markdown("**Staff Roles (Shapes & Colors):**")
 st.sidebar.markdown(
     """
-<div style='color: #1a1a1a; font-size: 15px; display: flex; flex-direction: column; gap: 8px;'>
-    <div style='display: flex; align-items: center; gap: 8px;'>
+<div style='font-size: 15px; display: flex; flex-direction: column; gap: 10px;'>
+    <div style='display: flex; align-items: center; gap: 10px;'>
         <svg width='24' height='24' viewBox='0 0 26 26'>
-            <polygon points='13,3 23,23 3,23' stroke='#1a1a1a' stroke-width='2.5' fill='none'/>
-        </svg> PCA
+            <polygon points='13,3 23,23 3,23' stroke='#28a745' stroke-width='2' fill='#28a745' fill-opacity='0.7'/>
+        </svg>
+        <span style='color:#1a1a1a;'>PCA</span>
     </div>
-    <div style='display: flex; align-items: center; gap: 8px;'>
+    <div style='display: flex; align-items: center; gap: 10px;'>
         <svg width='24' height='24' viewBox='0 0 26 26'>
-            <rect x='4' y='4' width='18' height='18' stroke='#1a1a1a' stroke-width='2.5' fill='none'/>
-        </svg> LPN
+            <rect x='4' y='4' width='18' height='18' stroke='#7B2FBE' stroke-width='2' fill='#7B2FBE' fill-opacity='0.7'/>
+        </svg>
+        <span style='color:#1a1a1a;'>LPN</span>
     </div>
-    <div style='display: flex; align-items: center; gap: 8px;'>
+    <div style='display: flex; align-items: center; gap: 10px;'>
         <svg width='24' height='24' viewBox='0 0 26 26'>
-            <polygon points='13,2 24,10 20,22 6,22 2,10' stroke='#1a1a1a' stroke-width='2.5' fill='none'/>
-        </svg> RN
+            <polygon points='13,2 24,10 20,22 6,22 2,10' stroke='#E8700A' stroke-width='2' fill='#E8700A' fill-opacity='0.7'/>
+        </svg>
+        <span style='color:#1a1a1a;'>RN</span>
     </div>
 </div>
 """,
@@ -210,20 +213,13 @@ for _, staff in staff_to_draw.iterrows():
     else:                       # PCA / anything else
         sides, fg = 3, fg_pcas
 
-    # All markers green until real scheduling data is available
-    fill_color = 'green'
-    # ── Color-by-availability (re-enable when schedule data is loaded) ──────
-    # avail = staff.get('Available_Hours')
-    # try:
-    #     avail_f = float(avail)
-    #     if avail_f > 10:
-    #         fill_color = 'green'
-    #     elif avail_f >= 1:
-    #         fill_color = 'orange'
-    #     else:
-    #         fill_color = 'red'
-    # except (TypeError, ValueError):
-    #     fill_color = 'green'
+    # Color by role (availability colors re-enable when schedule data is loaded)
+    if role == 'LPN':
+        fill_color = '#7B2FBE'   # purple
+    elif role == 'RN':
+        fill_color = '#E8700A'   # orange
+    else:
+        fill_color = '#28a745'   # green for PCA
 
     max_h   = fmt_hours(staff.get('Max_Weekly_Hours'))
     avail_h = fmt_hours(staff.get('Available_Hours'))
