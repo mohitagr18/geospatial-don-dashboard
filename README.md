@@ -55,7 +55,7 @@ This dashboard gives the Director of Nursing and schedulers a single screen to a
 | **Map ↔ Streamlit bridge** | [streamlit-folium](https://folium.streamlit.app) — captures click events from the Folium map |
 | **Data store** | [SQLite](https://www.sqlite.org) (`data/staffing_engine.db`) — zero-config embedded DB |
 | **Geocoding** | [Geocodio](https://www.geocod.io) batch API — converts addresses to lat/lng; results cached locally |
-| **ETL** | Custom Python scripts in `src/` |
+| **ETL** | `etl/sync.py` — automatic sync module, called by the app at startup |
 
 > **Privacy note:** The database contains real client and staff PII (names, phone numbers, home addresses). This application is designed for **internal deployment only** — a local laptop, an office machine on the LAN, or behind a VPN with access controls. It must **not** be deployed on Streamlit Community Cloud or any other public hosting platform.
 
@@ -67,14 +67,16 @@ This dashboard gives the Director of Nursing and schedulers a single screen to a
 geospatial-don-dashboard/
 │
 ├── src/
-│   ├── app.py                  # Main Streamlit dashboard
-│   ├── geocode_geocodio.py     # Incremental geocoder — run when new clients/staff are added
-│   └── setup_schema.py         # Rebuilds the SQLite view — run after schema changes
+│   └── app.py                  # Main Streamlit dashboard
+│
+├── etl/
+│   ├── __init__.py
+│   └── sync.py                 # Automatic Excel → DB sync + incremental geocoding
 │
 ├── data/                       # ⚠️  Excluded from Git (.gitignore)
 │   ├── staffing_engine.db      # SQLite database (tables + geocode cache + view)
-│   ├── CustomerData.xlsx       # Source client data
-│   └── CaregiverData.xlsx      # Source staff/caregiver data
+│   ├── clients.xlsx            # Source client data — drop updated file here
+│   └── staff.xlsx              # Source staff data — drop updated file here
 │
 ├── .env                        # API keys — never commit this file
 ├── .gitignore
@@ -90,9 +92,9 @@ geospatial-don-dashboard/
 - **Python 3.9+** (project uses 3.9 by default; see `.python-version`)
 - **uv** (recommended) or **pip** for dependency management
 - A **Geocodio API key** — create a free account at [geocod.io](https://www.geocod.io); the free tier covers thousands of addresses
-- The source Excel files (`CustomerData.xlsx`, `CaregiverData.xlsx`) placed in `data/`
+- The source Excel files (`clients.xlsx`, `staff.xlsx`) placed in `data/`
 
-> The `data/` directory is excluded from Git. You will need to obtain the source files separately and place them locally before running the ETL scripts.
+> The `data/` directory is excluded from Git. You will need to obtain the source files separately and place them locally.
 
 ---
 
@@ -136,35 +138,34 @@ geocodio_api_key=YOUR_KEY_HERE
 
 ## 7. Database and Data Preparation
 
-The SQLite database is built and maintained by two scripts:
+Data sync is **fully automatic** — the app handles it at startup. No manual scripts to run.
 
-### `src/geocode_geocodio.py` — run when new clients or staff are added
+### How it works
 
-This script performs the full ETL pipeline:
+When the DON starts (or refreshes) the app, the `etl/sync.py` module runs automatically:
 
-1. Reads `data/CustomerData.xlsx` and `data/CaregiverData.xlsx`
-2. Extracts **address columns only** (Street, City, State, Zip) — no names or other PII are ever sent to the Geocodio API
-3. Checks a local `geocode_cache` table in `staffing_engine.db` for addresses already processed
-4. Sends only **new, uncached** addresses to Geocodio's batch endpoint in a single API call
-5. Stores the returned coordinates in the cache for future runs
-6. Rebuilds the `clients` and `staff` tables using the full cached coordinate set
-7. Calls `setup_schema.py` to recreate the database view
+1. Reads `data/clients.xlsx` and `data/staff.xlsx`
+2. Compares every row against the existing database using a surrogate key (name + address)
+3. Classifies each row as **new**, **address-changed**, or **existing**
+4. **New / address-changed** rows → geocodes via Geocodio batch API (only address strings are sent — no PII)
+5. **Existing** rows → non-address fields (hours, status, etc.) are refreshed from the latest Excel, coordinates are preserved
+6. Rows that no longer appear in the Excel files are removed from the DB
+7. Rebuilds the `vw_staff_capacity` view
+8. Displays a status summary in the sidebar (e.g., "216 clients · 500 staff loaded · 3 new addresses geocoded")
+
+### DON workflow (non-technical)
+
+1. Export updated `clients.xlsx` and `staff.xlsx` from the agency system
+2. Drop them into the `data/` folder (replacing the old files)
+3. Click **🔄 Refresh Data** in the sidebar — or just restart the app
+4. Done — the dashboard will show the updated data
+
+### Manual re-sync
+
+You can also run the sync from the command line (useful for debugging):
 
 ```bash
-uv run python src/geocode_geocodio.py
-```
-
-On subsequent runs with no new records, the script detects that all addresses are already cached and exits without touching the API:
-```
-✅  No new addresses — skipping Geocodio API entirely.
-```
-
-### `src/setup_schema.py` — run after schema/view changes only
-
-Rebuilds the `vw_staff_capacity` view from the existing `staff` table. Use this when you've changed view columns or logic without adding new records from the Excel files.
-
-```bash
-uv run python src/setup_schema.py
+uv run python -c "from etl.sync import sync_db_from_excels; print(sync_db_from_excels())"
 ```
 
 ### Database schema at a glance
@@ -281,7 +282,7 @@ max_dist = {"5": 5, "10": 10, "15": 15, "20": 20, "25": 25}.get(radius_filter, f
 
 ### Add a new staff role or marker style
 
-1. Add the new role string to the `map_role()` function in `src/geocode_geocodio.py`
+1. Add the new role string to the `_map_role()` function in `etl/sync.py`
 2. Add a matching `elif` branch in the marker-drawing loop in `src/app.py` with the desired `number_of_sides` and `fill_color`
 3. Add a corresponding entry to the sidebar legend HTML block
 
@@ -291,10 +292,10 @@ Find the `display_cols` list in `src/app.py` and add or remove column names. Add
 
 ### Add preference filters (smoker, pets, etc.)
 
-The ETL pipeline is ready to carry extra columns from the Excel files. To add a pet/smoking filter:
+The ETL pipeline automatically carries all columns from the Excel files through to the database. To add a filter:
 
-1. Ensure the column (e.g., `Has_Cats`, `Prefers_Non_Smoker`) flows through `geocode_geocodio.py` into the DB
-2. Add it to the `SELECT` in `setup_schema.py`
+1. Ensure the column (e.g., `Has_Cats`, `Prefers_Non_Smoker`) exists in the source Excel
+2. Add it to the view SELECT in `etl/sync.py` (`_rebuild_view` function)
 3. Add an `st.sidebar.checkbox` or `st.sidebar.multiselect` in `app.py`
 4. Apply the filter to `staff_work` before the distance calculation
 
@@ -318,5 +319,5 @@ The ETL pipeline is ready to carry extra columns from the Excel files. To add a 
 | **Authentication** | Add [Streamlit-Authenticator](https://github.com/mkhorasani/Streamlit-Authenticator) or put the app behind an authenticated reverse proxy |
 | **Preference matching filters** | Sidebar checkboxes for pet compatibility, smoking preference, language, gender |
 | **Export to CSV** | Add an `st.download_button` to export the nearby staff table for a given client |
-| **Automated data refresh** | Schedule `geocode_geocodio.py` as a cron job or Windows Task Scheduler task to refresh nightly from the source Excel files |
+| **Automated refresh** | Set up a cron job or Task Scheduler to auto-run the sync nightly from updated Excel files |
 | **Mobile layout** | Streamlit's wide layout is desktop-optimised; a narrow layout variant would help on tablets |

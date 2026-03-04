@@ -28,9 +28,55 @@ def fmt_hours(val):
     except (TypeError, ValueError):
         return "N/A"
 
-# ─── DATA ─────────────────────────────────────────────────────────────────────
+# ─── DATA SYNC (runs once per session, or on manual refresh) ──────────────────
+# The DON only needs to drop updated clients.xlsx and staff.xlsx into data/.
+# Everything else is automatic.
 
-@st.cache_data
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from etl.sync import sync_db_from_excels
+
+@st.cache_data(show_spinner="Syncing data from Excel files…")
+def run_sync():
+    """Run the ETL pipeline once and return the result."""
+    return sync_db_from_excels()
+
+# Allow manual re-sync via sidebar button
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
+
+sync_result = run_sync()
+
+# ── Handle sync errors (friendly messages for the DON) ───────────────────────
+if not sync_result.ok:
+    st.error(sync_result.error)
+    st.stop()
+
+# ── Show sync summary ────────────────────────────────────────────────────────
+summary_parts = [
+    f"**{sync_result.total_clients}** clients",
+    f"**{sync_result.total_staff}** staff loaded",
+]
+if sync_result.new_geocoded:
+    summary_parts.append(f"**{sync_result.new_geocoded}** new address(es) geocoded")
+if sync_result.addr_updated:
+    summary_parts.append(f"**{sync_result.addr_updated}** address(es) re-geocoded")
+if sync_result.clients_removed or sync_result.staff_removed:
+    summary_parts.append(
+        f"**{sync_result.clients_removed + sync_result.staff_removed}** removed record(s)"
+    )
+
+st.sidebar.success(" · ".join(summary_parts))
+
+if sync_result.geocode_failures:
+    with st.sidebar.expander(f"⚠️ {len(sync_result.geocode_failures)} geocoding failure(s)"):
+        for addr in sync_result.geocode_failures:
+            st.write(f"• {addr}")
+
+# ── Load from the freshly-synced DB ──────────────────────────────────────────
+@st.cache_data(show_spinner=False)
 def load_data():
     conn = sqlite3.connect('data/staffing_engine.db')
     clients_df = pd.read_sql_query("SELECT * FROM clients", conn)
