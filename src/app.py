@@ -29,30 +29,37 @@ def fmt_hours(val):
         return "N/A"
 
 # ─── DATA SYNC (runs once per session, or on manual refresh) ──────────────────
-# The DON only needs to drop updated clients.xlsx and staff.xlsx into data/.
+# The DON only needs to drop updated CustomerData.xlsx and CaregiverData.xlsx
+# (the original export filenames from the agency system) into data/.
 # Everything else is automatic.
 
 import sys, os
+from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from etl.sync import sync_db_from_excels
 
 @st.cache_data(show_spinner="Syncing data from Excel files…")
 def run_sync():
-    """Run the ETL pipeline once and return the result."""
-    return sync_db_from_excels()
+    """Run the ETL pipeline once and return the result + timestamp."""
+    result = sync_db_from_excels()
+    return result, datetime.now()
 
 # Allow manual re-sync via sidebar button
 if st.sidebar.button("🔄 Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
-sync_result = run_sync()
+sync_result, sync_ts = run_sync()
 
 # ── Handle sync errors (friendly messages for the DON) ───────────────────────
 if not sync_result.ok:
     st.error(sync_result.error)
     st.stop()
+
+# ── Update the 'last refreshed' timestamp only after a successful sync ────────
+# This persists across Streamlit reruns within the same browser session.
+st.session_state.last_refreshed = sync_ts
 
 # ── Show sync summary ────────────────────────────────────────────────────────
 summary_parts = [
@@ -69,6 +76,11 @@ if sync_result.clients_removed or sync_result.staff_removed:
     )
 
 st.sidebar.success(" · ".join(summary_parts))
+
+# Show last refreshed timestamp
+if 'last_refreshed' in st.session_state:
+    ts_str = st.session_state.last_refreshed.strftime("%Y-%m-%d %H:%M")
+    st.sidebar.caption(f"Last refreshed: {ts_str}")
 
 if sync_result.geocode_failures:
     with st.sidebar.expander(f"⚠️ {len(sync_result.geocode_failures)} geocoding failure(s)"):
@@ -97,7 +109,7 @@ if 'selected_client' not in st.session_state:
     st.session_state.selected_client = None
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-
+st.sidebar.markdown("---")
 st.sidebar.header("Select Client")
 
 # Drive the selectbox index directly from session state.
@@ -116,29 +128,51 @@ dropdown_choice = st.sidebar.selectbox(
 
 # Sync dropdown ↔ session state (covers selection, x-clear, and map-click updates)
 if dropdown_choice != st.session_state.selected_client:
+    # When selecting a client for the FIRST time (or changing to a new one),
+    # auto-set radius to 5 mi — unless the user has already explicitly picked one.
+    was_none = st.session_state.selected_client is None
     st.session_state.selected_client = dropdown_choice   # None if user hit x
+    if dropdown_choice is not None and was_none and not st.session_state.get('radius_user_set'):
+        st.session_state.radius_filter = "5"
     st.rerun()
 
-st.sidebar.markdown("---")
 st.sidebar.header("Filters")
 
 has_client = bool(st.session_state.selected_client)
 
-# Use a Unicode 'greater-than' character so Streamlit doesn't treat > as HTML
-RADIUS_OPTIONS = ["5", "10", "15", "20", "25", "› 25 miles"]
-INF_OPTION     = "› 25 miles"   # must match exactly
+# ── Distance radius: two-column compact button layout ────────────────────────
+# Uses st.columns inside the sidebar to show 6 options in 2 columns (3 rows).
+# A single session_state key ('radius_filter') ensures only one value is active.
+# The downstream max_dist lookup remains exactly the same.
 
-radius_filter = st.sidebar.radio(
-    "Distance Radius (miles)",
-    RADIUS_OPTIONS,
-    disabled=not has_client,
-    help="Select a client first to filter by distance." if not has_client else "Filter staff by distance to the selected client."
+# Use plain '>' — safe inside st.button labels (not interpreted as HTML).
+RADIUS_OPTIONS = ["5", "10", "15", "20", "25", "> 25 mi"]
+INF_OPTION     = "> 25 mi"
+
+# Default to '5' (tight focus) — reset to this when a client is first selected.
+if 'radius_filter' not in st.session_state:
+    st.session_state.radius_filter = "5"
+
+st.sidebar.markdown(
+    "**Distance Radius (miles)**" + ("  ℹ️ *select a client first*" if not has_client else "")
 )
 
+col_left, col_right = st.sidebar.columns(2)
+for i, opt in enumerate(RADIUS_OPTIONS):
+    col = col_left if i % 2 == 0 else col_right
+    is_active = (st.session_state.radius_filter == opt)
+    btn_type  = "primary" if is_active else "secondary"
+    label     = f"✔ {opt}" if is_active else opt
+    if col.button(label, key=f"rad_{opt}", disabled=not has_client, type=btn_type, use_container_width=True):
+        st.session_state.radius_filter = opt
+        st.session_state.radius_user_set = True   # mark that user explicitly picked
+        st.rerun()
+
+radius_filter = st.session_state.radius_filter
 max_dist = {"5": 5, "10": 10, "15": 15, "20": 20, "25": 25}.get(radius_filter, float('inf'))
 
 # ── Sidebar Legend ────────────────────────────────────────────────────────────
-st.sidebar.markdown("---")
+
 st.sidebar.subheader("Legend")
 st.sidebar.markdown("🔵 Circle = Client")
 st.sidebar.markdown("**Staff Roles (Shapes & Colors):**")
@@ -185,6 +219,8 @@ st.sidebar.markdown(
 st.sidebar.markdown("---")
 if st.sidebar.button("Reset Map"):
     st.session_state.selected_client = None
+    st.session_state.radius_filter = "5"
+    st.session_state.radius_user_set = False
     st.rerun()
 
 # ─── MAP SETUP ────────────────────────────────────────────────────────────────
@@ -330,7 +366,11 @@ if clicked_tooltip:
         None,
     )
     if matched_name and st.session_state.selected_client != matched_name:
+        was_none = st.session_state.selected_client is None
         st.session_state.selected_client = matched_name
+        # Auto-set to 5 mi on first client selection via map click
+        if was_none and not st.session_state.get('radius_user_set'):
+            st.session_state.radius_filter = "5"
         st.rerun()
 
 # ─── DATAFRAME TABLE ─────────────────────────────────────────────────────────

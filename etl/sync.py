@@ -30,9 +30,11 @@ import requests
 from dotenv import load_dotenv
 
 # ─── CONFIGURATION ────────────────────────────────────────────────────────────
+# File paths — these match the agency system's export filenames exactly,
+# so the DON can drop them into data/ without renaming anything.
 DB_PATH           = "data/staffing_engine.db"
-CLIENTS_EXCEL     = "data/clients.xlsx"
-STAFF_EXCEL       = "data/staff.xlsx"
+CLIENTS_EXCEL     = "data/CustomerData.xlsx"
+STAFF_EXCEL       = "data/CaregiverData.xlsx"
 GEOCODIO_ENDPOINT = "https://api.geocod.io/v1.7/geocode"
 BATCH_SIZE        = 10_000
 
