@@ -146,8 +146,8 @@ has_client = bool(st.session_state.selected_client)
 # The downstream max_dist lookup remains exactly the same.
 
 # Use plain '>' — safe inside st.button labels (not interpreted as HTML).
-RADIUS_OPTIONS = ["5", "10", "15", "20", "25", "> 25 mi"]
-INF_OPTION     = "> 25 mi"
+RADIUS_OPTIONS = ["5", "10", "15", "20", "25", ">25 mi"]
+INF_OPTION     = ">25 mi"
 
 # Default to '5' (tight focus) — reset to this when a client is first selected.
 if 'radius_filter' not in st.session_state:
