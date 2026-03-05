@@ -87,6 +87,12 @@ if sync_result.geocode_failures:
         for addr in sync_result.geocode_failures:
             st.write(f"• {addr}")
 
+# ── Warn about missing optional columns (schema tolerance) ───────────────────
+if sync_result.missing_optional:
+    with st.sidebar.expander("⚠️ Missing optional columns"):
+        for tbl, cols in sync_result.missing_optional.items():
+            st.write(f"**{tbl}:** {', '.join(cols)} (showing as N/A)")
+
 # ── Load from the freshly-synced DB ──────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data():
@@ -271,25 +277,40 @@ else:
     staff_to_draw['Distance_Miles'] = None
 
 # ── Client markers ────────────────────────────────────────────────────────────
+# Helper to safely extract a string value; returns 'N/A' if missing/blank.
+def _safe(row, col, fallback='N/A'):
+    val = row.get(col)
+    if pd.isna(val) or str(val).strip() == '':
+        return fallback
+    return str(val).strip()
+
 for _, client in clients_to_draw.iterrows():
-    # Build address line gracefully — Address2 may be blank
-    addr_parts = [client.get('Address', '')]
-    if pd.notna(client.get('Address2')) and str(client.get('Address2', '')).strip():
-        addr_parts.append(str(client['Address2']).strip())
-    addr_parts.append(f"{client.get('City', '')}, {client.get('State', '')} {client.get('Zip', '')}")
+    lat, lon = client.get('Latitude'), client.get('Longitude')
+    if pd.isna(lat) or pd.isna(lon):
+        continue  # skip clients without valid coordinates
+
+    # Build address line gracefully — every part may be absent
+    addr_parts = [_safe(client, 'Address', '')]
+    a2 = _safe(client, 'Address2', '')
+    if a2:
+        addr_parts.append(a2)
+    addr_parts.append(f"{_safe(client, 'City', '')}, {_safe(client, 'State', '')} {_safe(client, 'Zip', '')}")
     address_str = " ".join(p for p in addr_parts if p.strip())
 
-    phone = client.get('Phone', '')
-    phone = str(phone).strip() if pd.notna(phone) and str(phone).strip() else 'N/A'
+    phone  = _safe(client, 'Phone')
+    gender = _safe(client, 'Gender')
+    cls    = _safe(client, 'Class')
 
     client_tooltip = (
         f"<b>{client['Full Name']}</b><br>"
         f"📞 {phone}<br>"
-        f"📍 {address_str}"
+        f"📍 {address_str}<br>"
+        f"<b>Gender:</b> {gender}<br>"
+        f"<b>Class:</b> {cls}"
     )
 
     folium.CircleMarker(
-        location=[client['Latitude'], client['Longitude']],
+        location=[lat, lon],
         radius=6,
         color='blue',
         fill=True,
@@ -299,7 +320,11 @@ for _, client in clients_to_draw.iterrows():
 
 # ── Staff markers ─────────────────────────────────────────────────────────────
 for _, staff in staff_to_draw.iterrows():
-    role = staff['Role']
+    lat, lon = staff.get('Latitude'), staff.get('Longitude')
+    if pd.isna(lat) or pd.isna(lon):
+        continue  # skip staff without valid coordinates
+
+    role = _safe(staff, 'Role', 'PCA')
     if role == 'LPN':
         sides, fg = 4, fg_lpns
     elif role == 'RN':
@@ -307,7 +332,7 @@ for _, staff in staff_to_draw.iterrows():
     else:                       # PCA / anything else
         sides, fg = 3, fg_pcas
 
-    # Color by role (availability colors re-enable when schedule data is loaded)
+    # Color by role
     if role == 'LPN':
         fill_color = '#7B2FBE'   # purple
     elif role == 'RN':
@@ -317,21 +342,20 @@ for _, staff in staff_to_draw.iterrows():
 
     max_h   = fmt_hours(staff.get('Max_Weekly_Hours'))
     avail_h = fmt_hours(staff.get('Available_Hours'))
-
-    mobile = staff.get('Mobile', '')
-    if pd.isna(mobile) or str(mobile).strip() == '':
-        mobile = 'N/A'
+    mobile  = _safe(staff, 'Mobile')
+    gender  = _safe(staff, 'Gender')
 
     tooltip_html = (
-        f"<b>Name:</b> {staff['First Name']} {staff['Last Name']}<br>"
+        f"<b>Name:</b> {_safe(staff, 'First Name', '')} {_safe(staff, 'Last Name', '')}<br>"
         f"<b>Phone:</b> {mobile}<br>"
         f"<b>Role:</b> {role}<br>"
+        f"<b>Gender:</b> {gender}<br>"
         f"<b>Max Weekly Hours:</b> {max_h}<br>"
         f"<b>Available Hours:</b> {avail_h}"
     )
 
     folium.RegularPolygonMarker(
-        location=[staff['Latitude'], staff['Longitude']],
+        location=[lat, lon],
         number_of_sides=sides,
         radius=10,
         color=fill_color,
@@ -387,15 +411,21 @@ if st.session_state.selected_client:
             na_position='last',
         )
 
-        display_cols = ['First Name', 'Last Name', 'Mobile', 'Role', 'Distance_Miles', 'Max_Weekly_Hours', 'Available_Hours']
+        # Build display columns dynamically — only include columns that exist
+        desired_cols = ['First Name', 'Last Name', 'Mobile', 'Role',
+                        'Distance_Miles', 'Max_Weekly_Hours', 'Available_Hours']
+        display_cols = [c for c in desired_cols if c in filtered_staff.columns]
         formatted_df = filtered_staff[display_cols].copy()
 
-        # Round distance
-        formatted_df['Distance_Miles'] = formatted_df['Distance_Miles'].round(1)
+        # Round distance (if present)
+        if 'Distance_Miles' in formatted_df.columns:
+            formatted_df['Distance_Miles'] = formatted_df['Distance_Miles'].round(1)
 
         # Replace NaN / invalid hours with "N/A" for display
-        formatted_df['Max_Weekly_Hours'] = formatted_df['Max_Weekly_Hours'].apply(fmt_hours)
-        formatted_df['Available_Hours']  = formatted_df['Available_Hours'].apply(fmt_hours)
+        if 'Max_Weekly_Hours' in formatted_df.columns:
+            formatted_df['Max_Weekly_Hours'] = formatted_df['Max_Weekly_Hours'].apply(fmt_hours)
+        if 'Available_Hours' in formatted_df.columns:
+            formatted_df['Available_Hours'] = formatted_df['Available_Hours'].apply(fmt_hours)
 
         formatted_df = formatted_df.rename(columns={
             'Mobile':           'Phone',

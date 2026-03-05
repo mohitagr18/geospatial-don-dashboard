@@ -3,7 +3,7 @@ etl/sync.py  ─  Automatic Excel → SQLite sync with incremental geocoding
 ═════════════════════════════════════════════════════════════════════════
 Designed for non-technical users.  The DON only needs to:
 
-    1.  Export updated clients.xlsx and staff.xlsx into  data/
+    1.  Export updated CustomerData.xlsx and CaregiverData.xlsx into  data/
     2.  Start (or refresh) the Streamlit app
 
 This module will:
@@ -42,9 +42,38 @@ BATCH_SIZE        = 10_000
 # These are the ONLY values sent to the Geocodio API  — no PII.
 ADDRESS_COLS = ["Address 1", "Address 2", "City", "State", "Zip"]
 
-# Required Excel columns — if any are missing we show a friendly error
+# ─── SCHEMA DEFINITION: REQUIRED vs OPTIONAL ─────────────────────────────────
+# Required columns MUST exist in the Excel export.  If missing, the ETL aborts
+# with a friendly error message listing exactly which columns are absent.
+#
+# Optional columns are used if present.  If missing, a safe default (None / NaN)
+# is filled in automatically, and a warning is surfaced in the UI.
+# Extra columns in the Excel that are not listed here are silently ignored.
+
 REQUIRED_CLIENT_COLS = ["First Name", "Last Name", "Address 1", "City", "State", "Zip"]
+OPTIONAL_CLIENT_COLS = ["Address 2", "Phone", "Gender", "Class", "Birth Date"]
+
 REQUIRED_STAFF_COLS  = ["First Name", "Last Name", "Address 1", "City", "State", "Zip"]
+OPTIONAL_STAFF_COLS  = ["Address 2", "Mobile", "Gender", "Status", "Hire Date",
+                        "Birth Date", "Skills", "Weekly Max Hours", "Daily Max Hours"]
+
+# ─── EXCLUSION LISTS ─────────────────────────────────────────────────────────────
+# Add "First Last" names here to permanently exclude them from the dashboard.
+# These rows will be dropped every time the Excel files are synced, even if
+# they appear in the agency export (e.g., test accounts, training records).
+#
+# ▸  To add a name, just append it to the list:  "Jane Doe"
+# ▸  Matching is case-insensitive.
+# ▸  The name must match  "First Name" + " " + "Last Name"  from the Excel.
+
+EXCLUDED_CLIENT_NAMES: list[str] = [
+    # Example:  "Test Client",
+]
+
+EXCLUDED_STAFF_NAMES: list[str] = [
+    "Pragya Chaurasia", "Divy Chaurasia", "Tierra Flowers",
+    "Lakisha Rose", "Mohit Aggarwal", "Marquise Lane"
+]
 
 
 # ─── RESULT CONTAINER ─────────────────────────────────────────────────────────
@@ -63,6 +92,7 @@ class SyncResult:
     clients_removed: int = 0
     staff_removed: int = 0
     geocode_failures: list = field(default_factory=list)  # address strings that failed
+    missing_optional: dict = field(default_factory=dict)  # {"Clients": [...], "Staff": [...]}
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -123,11 +153,38 @@ def _check_required_cols(df: pd.DataFrame, required: list, label: str) -> str | 
     if missing:
         return (
             f"The {label} spreadsheet is missing required column(s): "
-            f"{', '.join(missing)}. "
-            f"Found columns: {', '.join(df.columns)}. "
+            f"**{', '.join(missing)}**.\n\n"
+            f"Found columns: {', '.join(df.columns)}.\n\n"
             f"Please check the export from the agency system."
         )
     return None
+
+
+def _fill_optional_cols(df: pd.DataFrame, optional: list, label: str) -> list[str]:
+    """
+    For each optional column: if missing from the dataframe, add it with NaN.
+    Returns a list of the column names that were missing (for user warning).
+    """
+    missing = []
+    for col in optional:
+        if col not in df.columns:
+            df[col] = None
+            missing.append(col)
+    if missing:
+        print(f"  ⚠ {label}: optional column(s) missing and defaulted to N/A: {missing}")
+    return missing
+
+
+def _select_known_cols(df: pd.DataFrame, required: list, optional: list,
+                       extra_keep: list | None = None) -> pd.DataFrame:
+    """
+    Return only the columns the app knows about (required + optional + extra_keep).
+    Extra/unknown columns from the Excel are silently dropped so they never
+    break the DB schema or the Streamlit code.
+    """
+    known = set(required + optional + (extra_keep or []))
+    keep = [c for c in df.columns if c in known]
+    return df[keep]
 
 
 def _map_role(skill) -> str:
@@ -213,6 +270,8 @@ def _rebuild_view(conn: sqlite3.Connection):
     """
     Re-create the vw_staff_capacity view.
     Also create the schedule table if it doesn't exist yet.
+    The view only references columns that are always guaranteed to exist
+    because _fill_optional_cols ensures they are present (even if NaN).
     """
     conn.execute("""
         CREATE TABLE IF NOT EXISTS schedule (
@@ -227,6 +286,7 @@ def _rebuild_view(conn: sqlite3.Connection):
             s."First Name",
             s."Last Name",
             s.Mobile,
+            s.Gender,
             s.Role,
             s.Latitude,
             s.Longitude,
@@ -236,7 +296,7 @@ def _rebuild_view(conn: sqlite3.Connection):
         FROM staff s
         LEFT JOIN schedule sch ON s.Staff_ID = sch.Staff_ID
         GROUP BY
-            s.Staff_ID, s."First Name", s."Last Name", s.Mobile, s.Role,
+            s.Staff_ID, s."First Name", s."Last Name", s.Mobile, s.Gender, s.Role,
             s.Latitude, s.Longitude, s.Max_Weekly_Hours
     """)
     conn.commit()
@@ -271,7 +331,7 @@ def sync_db_from_excels() -> SyncResult:
         result.error = f"Error reading Excel files: {exc}"
         return result
 
-    # Column validation
+    # ── 1a.  Validate required columns ───────────────────────────────────────
     for df, req, label in [
         (clients_xl, REQUIRED_CLIENT_COLS, "Clients"),
         (staff_xl,   REQUIRED_STAFF_COLS,  "Staff"),
@@ -282,6 +342,38 @@ def sync_db_from_excels() -> SyncResult:
             result.error = err
             return result
 
+    # ── 1b.  Fill missing optional columns with safe defaults (NaN) ──────────
+    # This ensures downstream code can always reference these columns via .get()
+    # without KeyErrors, even if the DON's export omits them.
+    missing_client_opt = _fill_optional_cols(clients_xl, OPTIONAL_CLIENT_COLS, "Clients")
+    missing_staff_opt  = _fill_optional_cols(staff_xl,   OPTIONAL_STAFF_COLS,  "Staff")
+    if missing_client_opt:
+        result.missing_optional["Clients"] = missing_client_opt
+    if missing_staff_opt:
+        result.missing_optional["Staff"] = missing_staff_opt
+
+    # ── 1c.  Apply exclusion lists ───────────────────────────────────────────
+    # Drop rows whose "First Name" + " " + "Last Name" matches any excluded name.
+    # Runs every sync so excluded names never make it into the DB.
+    if EXCLUDED_CLIENT_NAMES:
+        excl_lower = {n.strip().lower() for n in EXCLUDED_CLIENT_NAMES}
+        full_names = (clients_xl["First Name"].str.strip() + " " + clients_xl["Last Name"].str.strip()).str.lower()
+        before = len(clients_xl)
+        clients_xl = clients_xl[~full_names.isin(excl_lower)].reset_index(drop=True)
+        dropped = before - len(clients_xl)
+        if dropped:
+            print(f"  🚫 Excluded {dropped} client(s) by name")
+
+    if EXCLUDED_STAFF_NAMES:
+        excl_lower = {n.strip().lower() for n in EXCLUDED_STAFF_NAMES}
+        full_names = (staff_xl["First Name"].str.strip() + " " + staff_xl["Last Name"].str.strip()).str.lower()
+        before = len(staff_xl)
+        staff_xl = staff_xl[~full_names.isin(excl_lower)].reset_index(drop=True)
+        dropped = before - len(staff_xl)
+        if dropped:
+            print(f"  🚫 Excluded {dropped} staff member(s) by name")
+
+    # Update counts after exclusion
     result.total_clients = len(clients_xl)
     result.total_staff   = len(staff_xl)
 
@@ -383,6 +475,9 @@ def sync_db_from_excels() -> SyncResult:
         print("  ✅ All addresses already cached — no Geocodio call needed.")
 
     # ── 7.  Prepare final DataFrames ─────────────────────────────────────────
+    #  We only keep known columns (required + optional) plus computed ones.
+    #  Extra columns from the Excel are dropped here so they never pollute
+    #  the DB schema or break the Streamlit app.
 
     def finalise_clients(xl_df: pd.DataFrame) -> pd.DataFrame:
         df = xl_df.copy()
@@ -392,8 +487,13 @@ def sync_db_from_excels() -> SyncResult:
         # Rename / tidy
         df = df.rename(columns={"Address 1": "Address", "Address 2": "Address2"})
         df.insert(0, "Client_ID", [f"C{i+1:03d}" for i in range(len(df))])
-        # Drop internal cols
+        # Drop internal keys and unknown extra columns
         df = df.drop(columns=["_skey", "_name_key", "_addr", "_action"], errors="ignore")
+        # Keep only columns the app uses (renamed versions)
+        known = {"Client_ID", "First Name", "Last Name", "Address", "Address2",
+                 "City", "State", "Zip", "Phone", "Gender", "Class", "Birth Date",
+                 "Latitude", "Longitude"}
+        df = df[[c for c in df.columns if c in known]]
         return df
 
     def finalise_staff(xl_df: pd.DataFrame) -> pd.DataFrame:
@@ -409,7 +509,14 @@ def sync_db_from_excels() -> SyncResult:
             )
         else:
             df["Max_Weekly_Hours"] = None
+        # Drop internal keys and unknown extra columns
         df = df.drop(columns=["_skey", "_name_key", "_addr", "_action"], errors="ignore")
+        known = {"Staff_ID", "First Name", "Last Name", "Address", "Address2",
+                 "City", "State", "Zip", "Mobile", "Gender", "Status",
+                 "Hire Date", "Birth Date", "Skills", "Weekly Max Hours",
+                 "Daily Max Hours", "Role", "Max_Weekly_Hours",
+                 "Latitude", "Longitude"}
+        df = df[[c for c in df.columns if c in known]]
         return df
 
     clients_final = finalise_clients(clients_xl)
