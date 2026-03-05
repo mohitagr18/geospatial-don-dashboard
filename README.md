@@ -1,323 +1,177 @@
-# YTI Homecare — Geospatial DON Dashboard
+# YTI Homecare — Staffing Dashboard
 
-An internal, privacy-first staffing tool for the Director of Nursing and scheduling team at YTI Homecare. The dashboard displays clients and caregivers on an interactive map, calculates drive distances on the fly, and surfaces the nearest available staff for any selected client — making it faster to decide who to assign before picking up the phone.
-
----
-
-## Table of Contents
-
-1. [Project Overview](#1-project-overview)
-2. [Key Features](#2-key-features)
-3. [Architecture](#3-architecture)
-4. [Directory Structure](#4-directory-structure)
-5. [Prerequisites](#5-prerequisites)
-6. [Installation](#6-installation)
-7. [Database and Data Preparation](#7-database-and-data-preparation)
-8. [Running the App](#8-running-the-app)
-9. [Using the Dashboard](#9-using-the-dashboard)
-10. [Security and Privacy](#10-security-and-privacy)
-11. [Customization](#11-customization)
-12. [Limitations and Future Work](#12-limitations-and-future-work)
+An internal tool for the Director of Nursing (DON) to visualise clients and available staff on an interactive map, filtered by distance.
 
 ---
 
-## 1. Project Overview
+## What it does
 
-YTI Homecare serves clients across the greater Richmond, VA metro area. Matching the right caregiver to a client involves balancing distance, schedule availability, and role qualifications (PCA, LPN, RN). Doing this lookup manually — cross-referencing spreadsheets, calling staff, checking hours — is slow and error-prone.
-
-This dashboard gives the Director of Nursing and schedulers a single screen to answer the question: *"Who is closest to this client and has hours available this week?"* Clicking a client on the map or selecting them from the sidebar dropdown instantly filters the entire caregiver roster to those within the chosen mile radius, sorted by distance. The result is a ranked, actionable list — ready for a phone call.
-
----
-
-## 2. Key Features
-
-- **Interactive Folium map** — clients shown as blue circles, caregivers as role-coded polygon shapes
-- **Role-coded marker shapes and colors**
-  - 🟢 Triangle = PCA (green)
-  - 🟣 Square = LPN (purple)
-  - 🟠 Pentagon = RN (orange)
-- **Bidirectional client selection** — select from the sidebar dropdown *or* click any client circle on the map; both stay in sync
-- **Distance radius filter** — 5 / 10 / 15 / 20 / 25 / › 25 miles; map auto-zooms to fit all visible pins
-- **Hover tooltips** — client tooltips show name, phone, and address; staff tooltips show name, phone, role, and hours
-- **Ranked staff table** — sorted by distance, showing phone, role, distance, and weekly hour availability
-- **Incremental geocoding** — addresses are geocoded with Geocodio only once; subsequent runs use a local cache and skip the API entirely for unchanged records
-- **Layer control** — toggle Clients, PCAs, LPNs, and RNs on/off independently
-- **Reset Map button** — clears the selection and returns to the full Richmond overview
+- Shows all **clients** (blue circles) and **staff** (coloured shapes by role) on an interactive map of the Richmond, VA area.
+- Select a client — by clicking the map or using the sidebar dropdown — to instantly see which staff are within a chosen distance radius (5, 10, 15, 20, 25, or > 25 miles).
+- The table below the map lists matching staff sorted by distance, with hours and contact info.
+- Data is kept up to date by dropping two Excel exports from the agency system into the `data/` folder and clicking **Refresh Data**.
 
 ---
 
-## 3. Architecture
+## Quick Start (first time)
 
-| Layer | Technology |
-|-------|-----------|
-| **UI** | [Streamlit](https://streamlit.io) — Python-native web UI, wide layout |
-| **Map** | [Folium](https://python-visualization.github.io/folium/) — Leaflet.js wrapper |
-| **Map ↔ Streamlit bridge** | [streamlit-folium](https://folium.streamlit.app) — captures click events from the Folium map |
-| **Data store** | [SQLite](https://www.sqlite.org) (`data/staffing_engine.db`) — zero-config embedded DB |
-| **Geocoding** | [Geocodio](https://www.geocod.io) batch API — converts addresses to lat/lng; results cached locally |
-| **ETL** | `etl/sync.py` — automatic sync module, called by the app at startup |
+### 1 — Prerequisites
 
-> **Privacy note:** The database contains real client and staff PII (names, phone numbers, home addresses). This application is designed for **internal deployment only** — a local laptop, an office machine on the LAN, or behind a VPN with access controls. It must **not** be deployed on Streamlit Community Cloud or any other public hosting platform.
-
----
-
-## 4. Directory Structure
-
-```
-geospatial-don-dashboard/
-│
-├── src/
-│   └── app.py                  # Main Streamlit dashboard
-│
-├── etl/
-│   ├── __init__.py
-│   └── sync.py                 # Automatic Excel → DB sync + incremental geocoding
-│
-├── data/                       # ⚠️  Excluded from Git (.gitignore)
-│   ├── staffing_engine.db      # SQLite database (tables + geocode cache + view)
-│   ├── clients.xlsx            # Source client data — drop updated file here
-│   └── staff.xlsx              # Source staff data — drop updated file here
-│
-├── .env                        # API keys — never commit this file
-├── .gitignore
-├── pyproject.toml              # Managed by uv
-├── uv.lock
-└── README.md
-```
-
----
-
-## 5. Prerequisites
-
-- **Python 3.9+** (project uses 3.9 by default; see `.python-version`)
-- **uv** (recommended) or **pip** for dependency management
-- A **Geocodio API key** — create a free account at [geocod.io](https://www.geocod.io); the free tier covers thousands of addresses
-- The source Excel files (`clients.xlsx`, `staff.xlsx`) placed in `data/`
-
-> The `data/` directory is excluded from Git. You will need to obtain the source files separately and place them locally.
-
----
-
-## 6. Installation
-
-### Clone the repository
-
-```bash
-git clone https://github.com/your-org/geospatial-don-dashboard.git
-cd geospatial-don-dashboard
-```
-
-### Set up the environment
-
-**With uv (recommended):**
-```bash
-pip install uv          # one-time global install
-uv sync                 # installs all dependencies from uv.lock
-```
-
-**With pip and a virtual environment:**
-```bash
-python -m venv .venv
-source .venv/bin/activate       # macOS/Linux
-# .venv\Scripts\activate        # Windows
-
-pip install streamlit folium streamlit-folium pandas python-dotenv requests openpyxl
-```
-
-### Configure the API key
-
-Create a `.env` file in the project root:
-
-```
-geocodio_api_key=YOUR_KEY_HERE
-```
-
-> `python-dotenv` loads this automatically when the geocoding script runs. **Do not commit `.env` to source control.**
-
----
-
-## 7. Database and Data Preparation
-
-Data sync is **fully automatic** — the app handles it at startup. No manual scripts to run.
-
-### How it works
-
-When the DON starts (or refreshes) the app, the `etl/sync.py` module runs automatically:
-
-1. Reads `data/clients.xlsx` and `data/staff.xlsx`
-2. Compares every row against the existing database using a surrogate key (name + address)
-3. Classifies each row as **new**, **address-changed**, or **existing**
-4. **New / address-changed** rows → geocodes via Geocodio batch API (only address strings are sent — no PII)
-5. **Existing** rows → non-address fields (hours, status, etc.) are refreshed from the latest Excel, coordinates are preserved
-6. Rows that no longer appear in the Excel files are removed from the DB
-7. Rebuilds the `vw_staff_capacity` view
-8. Displays a status summary in the sidebar (e.g., "216 clients · 500 staff loaded · 3 new addresses geocoded")
-
-### DON workflow (non-technical)
-
-1. Export updated `clients.xlsx` and `staff.xlsx` from the agency system
-2. Drop them into the `data/` folder (replacing the old files)
-3. Click **🔄 Refresh Data** in the sidebar — or just restart the app
-4. Done — the dashboard will show the updated data
-
-### Manual re-sync
-
-You can also run the sync from the command line (useful for debugging):
-
-```bash
-uv run python -c "from etl.sync import sync_db_from_excels; print(sync_db_from_excels())"
-```
-
-### Database schema at a glance
-
-| Table / View | Purpose |
+| Requirement | Notes |
 |---|---|
-| `clients` | All client records with geocoded lat/lng |
-| `staff` | All caregiver records with geocoded lat/lng |
-| `schedule` | Future scheduling data (currently empty) |
-| `vw_staff_capacity` | View joining `staff` + `schedule` to compute `Available_Hours` |
-| `geocode_cache` | Address → lat/lng cache, keyed by address string |
+| Python 3.9 + | Check with `python --version` |
+| [`uv`](https://docs.astral.sh/uv/) | Fast Python package manager — `pip install uv` |
+| Geocodio API key | Only needed when new addresses appear |
 
----
+### 2 — Clone and install
 
-## 8. Running the App
+```bash
+git clone https://github.com/mohitagr18/geospatial-don-dashboard.git
+cd geospatial-don-dashboard
+uv sync            # installs all dependencies into .venv
+```
+
+### 3 — Add your API key
+
+Create a file called `.env` in the project root:
+
+```
+GEOCODIO_API_KEY=your_key_here
+```
+
+> The key is only used when the app detects a **new or changed address** that isn't already in its local cache. Day-to-day refreshes won't trigger any API calls.
+
+### 4 — Add the data files
+
+Place **both** Excel exports from the agency system into the `data/` folder:
+
+```
+data/
+├── CustomerData.xlsx     ← client export
+├── CaregiverData.xlsx    ← caregiver/staff export
+└── staffing_engine.db    ← auto-created on first run
+```
+
+> **File names must match exactly.** The app looks for `CustomerData.xlsx` and `CaregiverData.xlsx`.
+
+### 5 — Run the app
 
 ```bash
 uv run streamlit run src/app.py
 ```
 
-Or if you installed with pip:
-```bash
-streamlit run src/app.py
-```
-
-Streamlit will print the local URL — open it in your browser:
-```
-Local URL: http://localhost:8501
-```
-
-The app uses `st.set_page_config(layout="wide")`, so it expands to fill the full browser width. A widescreen monitor (1440px+) gives the best experience.
+Then open **http://localhost:8501** in your browser.
 
 ---
 
-## 9. Using the Dashboard
+## Day-to-day use
 
-### Selecting a client
+### Updating data (e.g., after a weekly export)
 
-You have two options — both do the same thing:
+1. Export fresh **CustomerData.xlsx** and **CaregiverData.xlsx** from the agency system.
+2. Drop them into the `data/` folder (overwrite the old files).
+3. Click **🔄 Refresh Data** in the sidebar.
+4. Done — the app updates the database automatically.
 
-- **Sidebar dropdown** — type part of a name to filter, then click to select
-- **Map click** — click any blue circle directly on the map
+The app is smart about geocoding:
+- **New or address-changed records** → geocoded via Geocodio.
+- **Unchanged records** → coordinates reused from cache, no API call.
+- **Records removed from the Excel** → removed from the map.
 
-The dropdown and the map stay in sync: clicking a map marker updates the dropdown, and selecting from the dropdown updates the map focus.
+### Using the map
 
-### Filtering by distance
+| Action | Result |
+|---|---|
+| Click a blue circle on the map | Selects that client; highlights nearby staff |
+| Use the **Select Client** dropdown | Same as clicking on the map |
+| Change **Distance Radius** buttons | Filters staff to within that many miles |
+| Click **Reset Map** | Clears selection and zooms back out |
 
-Once a client is selected, the **Distance Radius** filter in the sidebar becomes active. Choose one of:
+### What the tooltips show
 
-`5 mi → 10 mi → 15 mi → 20 mi → 25 mi → › 25 mi (all)`
+**Client markers (blue circle):**  Name · Phone · Address · Gender · Class
 
-The map automatically re-zooms using `fit_bounds()` to frame the client and all visible staff within the chosen radius. The staff table below updates simultaneously.
-
-### Reading the map
-
-| Marker | Meaning |
-|--------|---------|
-| 🔵 Blue circle | Client |
-| 🟢 Green triangle | PCA (Personal Care Aide) |
-| 🟣 Purple square | LPN (Licensed Practical Nurse) |
-| 🟠 Orange pentagon | RN (Registered Nurse) |
-
-Hover over any marker to see a tooltip with the person's name, phone number, role, and (for staff) weekly hour details.
-
-Use the **layer control** (top-right of the map) to toggle individual groups on or off.
-
-### Reading the staff table
-
-The table below the map lists all staff within the selected radius, sorted by distance (nearest first):
-
-| Column | Description |
-|--------|-------------|
-| First Name / Last Name | Caregiver name |
-| Phone | Mobile number |
-| Role | PCA / LPN / RN |
-| Distance (Miles) | Straight-line distance from client, rounded to 1 decimal |
-| Max Weekly Hours | Cap from the source data; shows N/A if none set |
-| Available Hours | Max minus committed hours; shows N/A until scheduling data is loaded |
-
-### Resetting the view
-
-To return to the full Richmond overview and clear the selected client, either:
-- Click the **✕** icon inside the dropdown box to clear it, or
-- Click the **Reset Map** button in the sidebar
+**Staff markers (coloured shape):**  Name · Phone · Role · Gender · Max Weekly Hours · Available Hours
 
 ---
 
-## 10. Security and Privacy
+## Required Excel columns
 
-> ⚠️  **This application handles personally identifiable information (PII) and may touch protected health information (PHI). Handle it accordingly.**
+The app validates the spreadsheets on every load. It needs at minimum:
 
-- **Internal use only** — run on a local machine, an office computer on the LAN, or behind a VPN with access controls. Never deploy on Streamlit Community Cloud, Heroku, Railway, or any other public platform.
-- **Do not commit sensitive files** — both `data/` and `.env` are listed in `.gitignore`. Verify this before every `git push`, especially if you fork or move the repo.
-- **API key** — the Geocodio key in `.env` has billing implications. Store it securely and rotate it if it is ever exposed.
-- **Database** — `staffing_engine.db` contains home addresses of both clients and staff. Treat it like any other sensitive HR document. Do not email it, store it in shared cloud folders, or include it in backups that leave the office network unencrypted.
+| File | Required columns |
+|---|---|
+| `CustomerData.xlsx` | First Name, Last Name, Address 1, City, State, Zip |
+| `CaregiverData.xlsx` | First Name, Last Name, Address 1, City, State, Zip |
 
-**Recommended deployment patterns:**
-- Local laptop (single-user, ideal for the DON's workstation)
-- Office mini-PC or NAS on the internal network, accessible only over LAN
-- Cloud VM inside a private VPC, behind a reverse proxy (e.g., Nginx) with HTTP Basic Auth or SSO
+**Optional columns** (Gender, Phone, Class, Mobile, Weekly Max Hours, etc.) are used if present and shown as *N/A* if missing — the app will never crash because of a missing optional column.
+
+**Extra columns** in the Excel are silently ignored — you can export the full sheet as-is.
 
 ---
 
-## 11. Customization
+## Project structure
 
-### Change distance radius options
+```
+geospatial-don-dashboard/
+├── src/
+│   └── app.py                 # Streamlit app — map, filters, UI
+├── etl/
+│   ├── __init__.py
+│   └── sync.py                # ETL: reads Excel → geocodes → updates SQLite
+├── data/
+│   ├── CustomerData.xlsx      # Client export (drop updated file here)
+│   ├── CaregiverData.xlsx     # Staff export  (drop updated file here)
+│   └── staffing_engine.db     # SQLite database (auto-managed)
+├── .env                       # API key (never committed to git)
+├── pyproject.toml
+└── README.md
+```
 
-Edit the `RADIUS_OPTIONS` list and the `max_dist` lookup dict in `src/app.py`:
+---
+
+## For technical users
+
+### How the ETL works (`etl/sync.py`)
+
+1. Reads both Excel files and strips whitespace from column headers.
+2. Validates required columns; aborts with a clear error if any are missing.
+3. Fills missing optional columns with `None` (never crashes on schema changes).
+4. Applies the **exclusion list** — names in `EXCLUDED_CLIENT_NAMES` / `EXCLUDED_STAFF_NAMES` at the top of `sync.py` are always dropped before the DB is written (case-insensitive).
+5. Assigns a stable **surrogate key** (`lower(first_name|last_name|address)`) to each row so records can be tracked across refreshes without relying on IDs.
+6. Classifies each row as `new`, `addr_changed`, or `existing`.
+7. Geocodes only `new` and `addr_changed` rows via the [Geocodio](https://www.geocod.io/) batch API — only address strings are sent, never any PII.
+8. Writes final DataFrames to SQLite using a replace strategy, then rebuilds `vw_staff_capacity`.
+
+### Key configuration in `etl/sync.py`
 
 ```python
-RADIUS_OPTIONS = ["5", "10", "15", "20", "25", "› 25 miles"]
-max_dist = {"5": 5, "10": 10, "15": 15, "20": 20, "25": 25}.get(radius_filter, float('inf'))
+# File names the app expects in data/
+CLIENTS_EXCEL = "data/CustomerData.xlsx"
+STAFF_EXCEL   = "data/CaregiverData.xlsx"
+
+# Names excluded from every sync (test / training accounts)
+EXCLUDED_CLIENT_NAMES = ["Jane Doe", ...]
+EXCLUDED_STAFF_NAMES  = ["Test Aide", ...]
 ```
 
-### Add a new staff role or marker style
+### Tech stack
 
-1. Add the new role string to the `_map_role()` function in `etl/sync.py`
-2. Add a matching `elif` branch in the marker-drawing loop in `src/app.py` with the desired `number_of_sides` and `fill_color`
-3. Add a corresponding entry to the sidebar legend HTML block
+| Component | Technology |
+|---|---|
+| UI framework | [Streamlit](https://streamlit.io/) |
+| Map | [Folium](https://python-visualization.github.io/folium/) + [streamlit-folium](https://github.com/randyzwitch/streamlit-folium) |
+| Database | SQLite (`staffing_engine.db`) |
+| Geocoding | [Geocodio](https://www.geocod.io/) batch API |
+| Package manager | [uv](https://docs.astral.sh/uv/) |
 
-### Modify table columns
+### Possible future enhancements
 
-Find the `display_cols` list in `src/app.py` and add or remove column names. Add a matching entry to the `rename()` dict for a clean display name.
-
-### Add preference filters (smoker, pets, etc.)
-
-The ETL pipeline automatically carries all columns from the Excel files through to the database. To add a filter:
-
-1. Ensure the column (e.g., `Has_Cats`, `Prefers_Non_Smoker`) exists in the source Excel
-2. Add it to the view SELECT in `etl/sync.py` (`_rebuild_view` function)
-3. Add an `st.sidebar.checkbox` or `st.sidebar.multiselect` in `app.py`
-4. Apply the filter to `staff_work` before the distance calculation
+- Real scheduling data to show true available-hours per caregiver.
+- Preference matching (smoker, pets, language).
+- Role-based login / multi-user access.
+- Automated scheduled refresh (e.g., cron or Task Scheduler).
 
 ---
 
-## 12. Limitations and Future Work
-
-### Current limitations
-
-- **All staff markers are currently the same color** within each role — availability-based color coding (green / orange / red) is stubbed out pending real scheduling data in the `schedule` table
-- **Hours often show N/A** — the `Max_Weekly_Hours` field is not populated for most staff ("No Max"); `Available_Hours` depends on the `schedule` table which is currently empty
-- **No authentication** — Streamlit has no built-in auth; access control must be handled at the network or reverse-proxy level
-- **Straight-line distance only** — the Haversine formula gives crow-flies distance, not drive time or drive distance
-
-### Suggested future enhancements
-
-| Enhancement | Notes |
-|---|---|
-| **Scheduling data integration** | Populate the `schedule` table from the agency's scheduling system to get real availability |
-| **Drive time / routing** | Replace Haversine with Google Maps Distance Matrix or OSRM for accurate drive times |
-| **Authentication** | Add [Streamlit-Authenticator](https://github.com/mkhorasani/Streamlit-Authenticator) or put the app behind an authenticated reverse proxy |
-| **Preference matching filters** | Sidebar checkboxes for pet compatibility, smoking preference, language, gender |
-| **Export to CSV** | Add an `st.download_button` to export the nearby staff table for a given client |
-| **Automated refresh** | Set up a cron job or Task Scheduler to auto-run the sync nightly from updated Excel files |
-| **Mobile layout** | Streamlit's wide layout is desktop-optimised; a narrow layout variant would help on tablets |
+> ⚠️ **Privacy notice:** This app stores client and staff data locally. The only data ever sent externally is plain address strings to the Geocodio API. Never deploy this app on a public server or Streamlit Community Cloud.
